@@ -1,0 +1,28 @@
+{
+  "name": "portcullis-connect",
+  "version": "1.0.0",
+  "description": "A Discord client bot for our team",
+  "main": "dist/bot.js",
+  "scripts": {
+    "start": "node dist/bot.js",
+    "build": "tsc",
+    "dev": "ts-node src/bot.ts",
+    "deploy-commands": "ts-node src/deploy-commands.ts"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@clerk/clerk-sdk-node": "^5.0.54",
+    "@supabase/supabase-js": "^2.45.6",
+    "color.js": "^1.2.0",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "fast-average-color": "^9.4.0",
+    "fast-average-color-node": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.0"
+  }
+}
