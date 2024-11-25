@@ -76,15 +76,15 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('create-quote')
-    .setDescription('Create a quote for a customer')
+    .setDescription('Create a new quote for a customer')
     .addStringOption(option =>
       option.setName('customer_id')
-      .setDescription('Hyperline Customer ID')
+      .setDescription('Customer ID')
       .setRequired(true)
     )
-    .addNumberOption(option =>
-      option.setName('amount')
-      .setDescription('Quote amount in cents')
+    .addIntegerOption(option =>
+      option.setName('exports')
+      .setDescription('Number of exports per month')
       .setRequired(true)
     )
     .addStringOption(option =>

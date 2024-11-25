@@ -18,6 +18,8 @@ import {
 } from 'discord.js';
 
 import { createClerkUser, createHyperlineQuote, upsertUserToSupabase, createHyperlineCustomer } from './utils/customers';
+import { z } from 'zod';
+import { createSvixApp } from './utils/svix';
 
 const client = new Client({
   intents: [
@@ -30,6 +32,19 @@ const client = new Client({
 
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user?.tag}!`);
+});
+
+// Define the schema outside the event handler
+const registrationSchema = z.object({
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  organization: z.string().min(1, "Organization name is required"),
+  domain: z.string().min(1, "Domain is required"),
+  useCase: z.string()
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().positive().int()
+    .min(1, "Table size must be at least 1 row")
+    .max(1000000000, "Table size cannot exceed 1 billion rows"))
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -87,11 +102,11 @@ client.on(Events.InteractionCreate, async interaction => {
           .setStyle(TextInputStyle.Short)
           .setRequired(true);
 
-        const useCaseInput = new TextInputBuilder()
-          .setCustomId('useCase')
-          .setLabel('Data Export Use Case')
-          .setPlaceholder('e.g. Industrial, Financial, Healthcare, etc.')
-          .setStyle(TextInputStyle.Paragraph)
+        const largestTableInput = new TextInputBuilder()
+          .setCustomId('largestTable')
+          .setLabel('Largest Table Size (rows)')
+          .setPlaceholder('e.g. 1000000')
+          .setStyle(TextInputStyle.Short)
           .setRequired(true);
 
         modal.addComponents(
@@ -99,7 +114,7 @@ client.on(Events.InteractionCreate, async interaction => {
           new ActionRowBuilder<TextInputBuilder>().addComponents(lastNameInput),
           new ActionRowBuilder<TextInputBuilder>().addComponents(organizationInput),
           new ActionRowBuilder<TextInputBuilder>().addComponents(domainInput),
-          new ActionRowBuilder<TextInputBuilder>().addComponents(useCaseInput)
+          new ActionRowBuilder<TextInputBuilder>().addComponents(largestTableInput)
         );
 
         await interaction.showModal(modal);
@@ -112,27 +127,47 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isModalSubmit() && interaction.customId === 'client-registration-form') {
       await interaction.deferReply({ ephemeral: true });
       
-      const firstName = interaction.fields.getTextInputValue('firstName');
-      const lastName = interaction.fields.getTextInputValue('lastName');
-      const organization = interaction.fields.getTextInputValue('organization');
-      const domain = interaction.fields.getTextInputValue('domain');
-      const useCase = interaction.fields.getTextInputValue('useCase');
-
       try {
-        // Create role for domain if it doesn't exist
-        let role = interaction.guild?.roles.cache.find(r => r.name === domain);
+        // Ensure all fields are defined before parsing
+        const firstName = interaction.fields.getTextInputValue('firstName');
+        const lastName = interaction.fields.getTextInputValue('lastName');
+        const organization = interaction.fields.getTextInputValue('organization');
+        const domain = interaction.fields.getTextInputValue('domain');
+        const largestTable = interaction.fields.getTextInputValue('largestTable');
+
+        // Check for undefined values
+        if (!firstName || !lastName || !organization || !domain || !largestTable) {
+          await interaction.editReply({
+            content: 'All fields are required. Please fill in all fields.'
+          });
+          return;
+        }
+
+        // Parse and validate the input
+        const formData = registrationSchema.parse({
+          firstName,
+          lastName,
+          organization,
+          domain,
+          largestTable
+        });
+
+        // Now formData.largestTable is guaranteed to be a valid number
+        // Continue with the rest of your code using formData instead of direct field access
+        let role = interaction.guild?.roles.cache.find(r => r.name === formData.domain);
         if (!role) {
           const color = '#030303';
-          const logo = `https://img.logo.dev/${domain}?token=pk_Bm3yO9a1RZumHNuIQJtxqg`;
+          const logo = `https://img.logo.dev/${formData.domain}?token=pk_Bm3yO9a1RZumHNuIQJtxqg`;
           role = await interaction.guild?.roles.create({
-            name: domain,
+            name: formData.domain,
             color: color,
+            icon: logo,
             reason: 'New client domain role'
           });
         }
 
         // Create private channel
-        const channelName = `${organization.toLowerCase().replace(/[^a-z0-9]/g, '-')}-welcome`;
+        const channelName = `${formData.organization.toLowerCase().replace(/[^a-z0-9]/g, '-')}-welcome`;
         const channel = await interaction.guild?.channels.create({
           name: channelName,
           type: ChannelType.GuildText,
@@ -168,8 +203,8 @@ client.on(Events.InteractionCreate, async interaction => {
         // Send welcome message in new channel
         await channel?.send({
           embeds: [{
-            title: `Welcome ${firstName} ${lastName}!`,
-            description: `Thank you for registering with Portcullis.\n\n**Organization:** ${organization}\n**Domain:** ${domain}\n**Data Warehouse Info:** ${useCase}`,
+            title: `Welcome ${formData.firstName} ${formData.lastName}!`,
+            description: `Thank you for registering with Portcullis.\n\n**Organization:** ${formData.organization}\n**Domain:** ${formData.domain}\n**Largest Table Size:** ${formData.useCase.toLocaleString()} rows`,
             color: role?.color
           }]
         });
@@ -181,6 +216,14 @@ client.on(Events.InteractionCreate, async interaction => {
         });
 
       } catch (error) {
+        if (error instanceof z.ZodError) {
+          const errorMessage = error.errors.map(err => err.message).join('\n');
+          await interaction.editReply({
+            content: `Invalid input:\n${errorMessage}`
+          });
+          return;
+        }
+        // Handle other errors...
         console.error(error);
         await interaction.editReply({
           content: 'There was an error processing your registration. Please try again.'
@@ -191,13 +234,13 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isCommand() && interaction.commandName === 'create-user') {
       try {
         await interaction.deferReply({ ephemeral: true });
-        
+    
         const email = interaction.options.get('email')?.value as string;
         const firstName = interaction.options.get('first_name')?.value as string;
         const lastName = interaction.options.get('last_name')?.value as string;
         const domain = interaction.options.get('domain')?.value as string;
-        const organizationName = interaction.options.get('organization')?.value as string;
-        
+        const organization = interaction.options.get('organization')?.value as string;
+    
         try {
           const result = await createClerkUser(
             email,
@@ -205,16 +248,32 @@ client.on(Events.InteractionCreate, async interaction => {
             firstName,
             lastName,
             domain,
-            organizationName
+            organization
           );
-          
+          const svixAppId = await createSvixApp(organization);
+    
+          // Prepare the data to insert into Supabase
+          const userData = {
+            id: interaction.user.id, // Add the id here
+            email,
+            discord_user_id: interaction.user.id, // Get Discord user ID from the interaction
+            first_name: firstName,  // Make sure property names match Supabase schema
+            last_name: lastName,
+            domain,
+            organization,
+            svixAppId,  // Include Svix App ID
+          };
+    
+          // Insert or update the user in Supabase (but no need to use the response)
+          await upsertUserToSupabase(userData);
+    
           await interaction.editReply({
             content: `✅ User created successfully!
-Email: ${email}
-Name: ${firstName} ${lastName}
-Clerk ID: ${result.user.id}
-${result.organization ? `Organization ID: ${result.organization.id}` : ''}
-${result.organization ? `API Key: ${result.organization.publicMetadata?.apiKey}` : ''}`
+    Email: ${email}
+    Name: ${firstName} ${lastName}
+    Clerk ID: ${result.user.id}
+    ${result.organization && typeof result.organization !== 'string' ? `Organization ID: ${result.organization.id}` : ''}
+    ${result.organization && typeof result.organization !== 'string' ? `API Key: ${result.organization.publicMetadata?.apiKey}` : ''}`
           });
         } catch (error: any) {
           if (error.clerkError && error.status === 422) {
@@ -231,27 +290,31 @@ ${result.organization ? `API Key: ${result.organization.publicMetadata?.apiKey}`
       } catch (error) {
         console.error('Interaction error:', error);
       }
-    }
+    }    
+    
 
     if (interaction.isCommand() && interaction.commandName === 'create-quote') {
       await interaction.deferReply({ ephemeral: true });
       try {
         const customerId = interaction.options.get('customer_id')?.value as string;
-        const amount = interaction.options.get('amount')?.value as number;
+        const exports = interaction.options.get('exports')?.value as number;
         const currency = interaction.options.get('currency')?.value as string;
         
+        const amount = exports * 250;
+
         const quote = await createHyperlineQuote({
           customer_id: customerId,
           amount: amount,
           currency: currency
         });
 
+        // Ensure all values are defined before creating the embed
         const embed = new EmbedBuilder()
           .setTitle('Quote Created')
           .setDescription(`A new quote has been created for customer ${customerId}`)
           .addFields(
-            { name: 'Amount', value: `${(amount/100).toFixed(2)} ${currency.toUpperCase()}`, inline: true },
-            { name: 'Status', value: quote.status, inline: true },
+            { name: 'Exports per Month', value: `${exports ?? '10'}`, inline: true },
+            { name: 'Amount', value: `${amount.toFixed(2)} ${currency?.toUpperCase() ?? 'N/A'}`, inline: true },
             { name: 'Quote URL', value: quote.hosted_url || 'Not available' }
           )
           .setColor(0x0099FF);

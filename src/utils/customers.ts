@@ -38,7 +38,7 @@ export async function createClerkOrganization(name: string, userId: string, doma
   const { error } = await upsertOrganizationToSupabase({
     id: organization.id,
     created_by: userId,
-    organizationName: name,
+    logo: logoUrl,
     api_key: apiKey,
     domain: domain || undefined
   });
@@ -57,8 +57,9 @@ export async function createClerkUser(
   firstName: string,
   lastName: string,
   domain: string,
-  organizationName?: string,
-  hyperlineId?: string
+  svixAppId: string,
+  organization?: string,
+  hyperlineId?: string,
 ) {
   // Create the user first
   const user = await clerk.users.createUser({
@@ -73,9 +74,9 @@ export async function createClerkUser(
   });
 
   // If an org name is provided, create an organization
-  if (organizationName) {
-    const organization = await createClerkOrganization(
-      organizationName,
+  if (organization) {
+    const org = await createClerkOrganization(
+      organization,
       user.id,
       domain
     );
@@ -85,13 +86,14 @@ export async function createClerkUser(
       id: user.id,
       email,
       discord_user_id: discordUserId,
-      organization: organization.id,
+      organization: org.id,
       first_name: firstName,
       last_name: lastName,
-      domain
+      domain,
+      svixAppId
     });
 
-    return { user, organization };
+    return { user, organization: org };
   }
 
   // If no org name, just store the user
@@ -102,10 +104,11 @@ export async function createClerkUser(
     organization: '',
     first_name: firstName,
     last_name: lastName,
-    domain
+    domain,
+    svixAppId
   });
 
-  return { user };
+  return { user, organization };
 }
 
 export async function createHyperlineCustomer(data: {
@@ -160,7 +163,7 @@ export async function createHyperlineCustomer(data: {
 
 export async function generatePortcullisApiKey(orgId: string) {
   const randomBytes = crypto.randomBytes(32);
-  const apiKey = `pk_${orgId}_${randomBytes.toString('base64url')}`;
+  const apiKey = `pk_${randomBytes.toString('base64url')}`;
   return apiKey;
 }
 
@@ -168,7 +171,7 @@ export async function upsertOrganizationToSupabase(data: {
   id: string;
   created_by: string;
   domain?: string;
-  organizationName?: string;
+  logo?: string;
   api_key: string;
 }) {
   return await supabase
@@ -206,6 +209,7 @@ export async function upsertUserToSupabase(data: {
   first_name: string;
   last_name: string;
   domain: string;
+  svixAppId: string
 }) {
   return await supabase
     .from('users')
