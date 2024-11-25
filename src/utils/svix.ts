@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Svix API endpoint and key (ensure these are set in your environment variables)
-const SVIX_API_URL = 'https://api.svix.com/v1/apps/';
+const SVIX_API_URL = 'https://api.us.svix.com/api/v1/app/';
 const SVIX_API_KEY = process.env.SVIX_API_KEY;  // Ensure this is set in your .env
 
 // Create a Svix App and return the App ID
